@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Infinite Chess King — Tiny Game</title>
+  <style>
+    html, body { height: 100%; margin: 0; background:#111; color:#eee; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    .wrap { display:flex; flex-direction:column; height:100%; }
+    header { padding:8px 12px; background:#181818; display:flex; gap:12px; align-items:center; border-bottom:1px solid #222; }
+    header .status { flex:1; font-size:14px; opacity:.9; }
+    header button { background:#2a2a2a; color:#fff; border:1px solid #333; border-radius:8px; padding:6px 10px; cursor:pointer; }
+    header button:hover { background:#363636; }
+    #game { flex:1; position:relative; }
+    canvas { width:100%; height:100%; display:block; }
+    footer { padding:8px 12px; font-size:12px; color:#bbb; background:#161616; border-top:1px solid #222; }
+    .hint { opacity:.9 }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="status" id="status">Move Phase: click a neighboring cell to move the king.</div>
+    <button id="resetBtn">Reset</button>
+  </header>
+  <div id="game"><canvas id="board"></canvas></div>
+  <footer>
+    <div class="hint">
+      Rules: The king moves like a chess king (one step in any direction) onto a non-erased cell. After each king move, you must erase one cell by clicking it. You cannot erase the cell with the king on it.
+    </div>
+  </footer>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('board');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const resetBtn = document.getElementById('resetBtn');
+
+  // Game/world state
+  let king = { x: 0, y: 0 };            // world coords
+  const erased = new Set();              // keys as "x,y"
+  let phase = 'move';                    // 'move' -> 'erase' -> 'move' ...
+
+  // View settings
+  let cell = 48;                         // cell size in pixels
+  let cols = 0, rows = 0;                // number of visible cells
+
+  // Helpers
+  const key = (x,y) => `${x},${y}`;
+  const isErased = (x,y) => erased.has(key(x,y));
+
+  function resize(){
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+
+    // Choose an odd number of cols/rows so the king can stay centered
+    cols = Math.max(7, Math.floor(w / cell) | 1);
+    if (cols % 2 === 0) cols += 1;
+    rows = Math.max(7, Math.floor(h / cell) | 1);
+    if (rows % 2 === 0) rows += 1;
+
+    draw();
+  }
+
+  function worldTopLeft(){
+    const left = king.x - Math.floor(cols/2);
+    const top  = king.y - Math.floor(rows/2);
+    return { left, top };
+  }
+
+  function draw(){
+    const { width: W, height: H } = canvas;
+    // Clear (use CSS-scaled ctx so use client sizes)
+    ctx.clearRect(0,0,canvas.clientWidth,canvas.clientHeight);
+
+    // Background
+    ctx.fillStyle = '#121212';
+    ctx.fillRect(0,0,canvas.clientWidth,canvas.clientHeight);
+
+    const { left, top } = worldTopLeft();
+
+    // Draw cells (erased shading + checker pattern)
+    for(let r=0; r<rows; r++){
+      for(let c=0; c<cols; c++){
+        const wx = left + c;
+        const wy = top + r;
+        const x = c * cell;
+        const y = r * cell;
+        // squares
+        const dark = (wx + wy) & 1;
+        ctx.fillStyle = dark ? '#1d1d1d' : '#181818';
+        ctx.fillRect(x, y, cell, cell);
+        // erased overlay
+        if(isErased(wx, wy)){
+          ctx.fillStyle = 'rgba(150,150,150,0.35)';
+          ctx.fillRect(x, y, cell, cell);
+        }
+      }
+    }
+
+    // Grid lines
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 1;
+    for(let c=0; c<=cols; c++){
+      const x = Math.floor(c*cell) + 0.5; // crisp
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x, rows*cell); ctx.stroke();
+    }
+    for(let r=0; r<=rows; r++){
+      const y = Math.floor(r*cell) + 0.5;
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(cols*cell, y); ctx.stroke();
+    }
+
+    // Draw king
+    const kx = king.x - left; // cell index in view
+    const ky = king.y - top;
+    const cx = kx*cell + cell/2;
+    const cy = ky*cell + cell/2;
+
+    // King base circle
+    ctx.beginPath();
+    ctx.fillStyle = '#e9c46a';
+    ctx.arc(cx, cy, Math.min(cell*0.36, 18), 0, Math.PI*2);
+    ctx.fill();
+
+    // Simple crown
+    const crownW = cell*0.42, crownH = cell*0.28;
+    ctx.fillStyle = '#f4e285';
+    ctx.beginPath();
+    ctx.moveTo(cx - crownW/2, cy - crownH/2);
+    ctx.lineTo(cx - crownW/4, cy - crownH*0.95);
+    ctx.lineTo(cx,             cy - crownH/2);
+    ctx.lineTo(cx + crownW/4, cy - crownH*0.95);
+    ctx.lineTo(cx + crownW/2, cy - crownH/2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Outline
+    ctx.strokeStyle = '#00000088';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.min(cell*0.36, 18), 0, Math.PI*2);
+    ctx.stroke();
+  }
+
+  function setPhase(p){
+    phase = p;
+    statusEl.textContent = (p === 'move')
+      ? 'Move Phase: click a neighboring cell to move the king.'
+      : 'Erase Phase: click any visible cell to erase (not the king\'s cell).';
+    draw();
+  }
+
+  // Convert canvas pixel to world cell
+  function pixelToWorldCell(px, py){
+    const rect = canvas.getBoundingClientRect();
+    const x = px - rect.left;
+    const y = py - rect.top;
+    const c = Math.floor(x / cell);
+    const r = Math.floor(y / cell);
+    const { left, top } = worldTopLeft();
+    return { wx: left + c, wy: top + r, c, r };
+  }
+
+  function tryMoveTo(x,y){
+    // Only one step king move
+    const dx = x - king.x;
+    const dy = y - king.y;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== 1){ return false; }
+    if (isErased(x,y)) { return false; }
+    king.x = x; king.y = y;
+    setPhase('erase');
+    return true;
+  }
+
+  function tryEraseAt(x,y){
+    if (x === king.x && y === king.y) return false;
+    const k = key(x,y);
+    if (erased.has(k)) return false;
+    erased.add(k);
+    setPhase('move');
+    return true;
+  }
+
+  canvas.addEventListener('click', (e)=>{
+    const { wx, wy } = pixelToWorldCell(e.clientX, e.clientY);
+    if (phase === 'move') {
+      if (tryMoveTo(wx, wy)) draw();
+    } else {
+      if (tryEraseAt(wx, wy)) draw();
+    }
+  });
+
+  // Optional: keyboard arrows for orthogonal moves, diagonals with Q/E/Z/C
+  window.addEventListener('keydown', (e)=>{
+    if (phase !== 'move') return;
+    const map = {
+      ArrowUp: [0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0],
+      q:[-1,-1], e:[1,-1], z:[-1,1], c:[1,1]
+    };
+    const k = e.key;
+    if (map[k]){
+      const [dx,dy] = map[k];
+      tryMoveTo(king.x + dx, king.y + dy) && draw();
+    }
+  });
+
+  resetBtn.addEventListener('click', ()=>{
+    king = {x:0,y:0};
+    erased.clear();
+    setPhase('move');
+    draw();
+  });
+
+  window.addEventListener('resize', resize);
+  resize();
+  setPhase('move');
+})();
+</script>
+</body>
+</html>
+
